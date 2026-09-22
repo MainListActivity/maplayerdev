@@ -141,7 +141,8 @@ impl Server {
                     let server = self.clone_ref();
                     let allowed_now = allowed;
                     tokio::spawn(async move {
-                        if let Err(e) = server.handle_stream(remote, allowed_now, send, recv).await {
+                        if let Err(e) = server.handle_stream(remote, allowed_now, send, recv).await
+                        {
                             tracing::debug!(%remote, "stream closed: {e}");
                         }
                     });
@@ -240,7 +241,9 @@ impl Server {
             }
             "maplayer/profile_default" => {
                 let p: ProfileDefaultParams = serde_json::from_value(params)?;
-                self.profiles.codex_home(Some(&p.name), &self.config).await?;
+                self.profiles
+                    .codex_home(Some(&p.name), &self.config)
+                    .await?;
                 let mut cfg = self.config.server_config().await;
                 cfg.default_profile = Some(p.name);
                 self.config.save_server_config(&cfg).await?;

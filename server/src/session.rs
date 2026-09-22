@@ -41,7 +41,10 @@ pub struct SessionManager {
     sessions: RwLock<HashMap<String, Arc<AcpSession>>>,
 }
 
-fn spawn_command(params: &SessionNewParams, codex_home: Option<std::path::PathBuf>) -> Result<Command> {
+fn spawn_command(
+    params: &SessionNewParams,
+    codex_home: Option<std::path::PathBuf>,
+) -> Result<Command> {
     let mut cmd = match params.provider.as_str() {
         "codex" => {
             // codex-acp adapter via npx; CODEX_HOME picks the account profile.

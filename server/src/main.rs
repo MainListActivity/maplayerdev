@@ -45,8 +45,7 @@ enum ProfileCmd {
 async fn main() -> Result<()> {
     tracing_subscriber::fmt()
         .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "info".into()),
+            tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()),
         )
         .init();
 
@@ -64,7 +63,10 @@ async fn main() -> Result<()> {
                 server.open_pairing(pin.clone());
                 let ticket = server.pair_ticket().await?;
                 println!("pairing PIN: {pin}");
-                println!("pairing ticket (QR payload): {}", serde_json::to_string(&ticket)?);
+                println!(
+                    "pairing ticket (QR payload): {}",
+                    serde_json::to_string(&ticket)?
+                );
                 println!("pairing window is OPEN — accept only the device you expect.");
             }
             server.run().await?;
@@ -79,9 +81,12 @@ async fn main() -> Result<()> {
                 ProfileCmd::List => {
                     let profiles = pm.list().await?;
                     let default = cfg.server_config().await.default_profile;
-                    println!("{}", serde_json::to_string_pretty(&serde_json::json!({
-                        "profiles": profiles, "default": default,
-                    }))?);
+                    println!(
+                        "{}",
+                        serde_json::to_string_pretty(&serde_json::json!({
+                            "profiles": profiles, "default": default,
+                        }))?
+                    );
                 }
                 ProfileCmd::New { name, credential } => {
                     let r = pm.create(&name, &credential).await?;
