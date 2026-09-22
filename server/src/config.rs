@@ -26,9 +26,7 @@ pub struct ServerConfig {
 
 impl Config {
     pub fn load() -> Result<Self> {
-        let root = dirs::home_dir()
-            .context("no home dir")?
-            .join(".maplayer");
+        let root = dirs::home_dir().context("no home dir")?.join(".maplayer");
         Ok(Self {
             allowlist_path: root.join("allowlist.json"),
             key_path: root.join("secret_key"),
@@ -79,7 +77,8 @@ impl Config {
         let mut list = self.allowlist().await.unwrap_or_default();
         list.nodes.insert(id.to_string());
         if let Some(label) = label {
-            list.nodes.insert(format!("{id}#{}", label.replace('\n', " ")));
+            list.nodes
+                .insert(format!("{id}#{}", label.replace('\n', " ")));
         }
         fs::write(&self.allowlist_path, serde_json::to_vec_pretty(&list)?).await?;
         Ok(())
@@ -88,7 +87,11 @@ impl Config {
     pub async fn is_allowed(&self, id: &EndpointId) -> bool {
         self.allowlist()
             .await
-            .map(|l| l.nodes.iter().any(|n| n.split('#').next() == Some(&id.to_string())))
+            .map(|l| {
+                l.nodes
+                    .iter()
+                    .any(|n| n.split('#').next() == Some(&id.to_string()))
+            })
             .unwrap_or(false)
     }
 
