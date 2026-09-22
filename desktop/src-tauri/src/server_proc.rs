@@ -1,5 +1,5 @@
 //! Owns the maplayer-server child process: spawn, scrape stdout for the
-//! endpoint id / pairing PIN / ticket, relay log lines to the UI.
+//! endpoint id / addr / pairing ticket, relay log lines to the UI.
 
 use anyhow::{bail, Context, Result};
 use serde_json::json;
@@ -29,20 +29,32 @@ pub struct ServerStatus {
 }
 
 fn server_bin() -> String {
-    std::env::var("MAPLAYER_SERVER_BIN").unwrap_or_else(|_| {
-        // Dev layout: server binary built by `cargo build` at the workspace
-        // root; packaged builds should set MAPLAYER_SERVER_BIN.
-        for cand in [
-            "../target/debug/maplayer-server",
-            "../target/release/maplayer-server",
-            "maplayer-server",
-        ] {
-            if std::path::Path::new(cand).exists() {
-                return cand.to_string();
-            }
+    if let Ok(v) = std::env::var("MAPLAYER_SERVER_BIN") {
+        if !v.is_empty() {
+            return v;
         }
-        "maplayer-server".to_string()
-    })
+    }
+    let bin = format!("maplayer-server{}", std::env::consts::EXE_SUFFIX);
+    let mut cands = Vec::new();
+    // Workspace target dir, independent of launch CWD: src-tauri lives two
+    // levels below the repo root, so ../../target is <repo>/target.
+    let manifest = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+    for profile in ["debug", "release"] {
+        cands.push(manifest.join("../../target").join(profile).join(&bin));
+    }
+    // CWD-relative layouts: launched from the repo root, desktop/, or
+    // desktop/src-tauri.
+    for base in ["target", "../target", "../../target"] {
+        for profile in ["debug", "release"] {
+            cands.push(std::path::Path::new(base).join(profile).join(&bin));
+        }
+    }
+    for cand in cands {
+        if cand.is_file() {
+            return cand.to_string_lossy().into_owned();
+        }
+    }
+    bin // fall back to PATH lookup
 }
 
 impl ServerProc {
@@ -56,8 +68,10 @@ impl ServerProc {
         }
     }
 
-    /// The ticket the in-process client uses to reach its own server —
-    /// the same JSON a phone would paste, minus the pin.
+    /// The ticket the in-process client uses to reach its own server. While
+    /// the pairing window is open this is the full printed ticket (pin
+    /// included, so the client can `pair_hello` itself onto the allowlist);
+    /// otherwise just `{addr, pin: null}` for an already-allowlisted client.
     pub fn connected_ticket(&self) -> Option<String> {
         self.connected_ticket.lock().unwrap().clone()
     }
@@ -75,6 +89,8 @@ impl ServerProc {
         let stdout = child.stdout.take().context("server stdout")?;
 
         *self.pairing.lock().unwrap() = pair;
+        *self.ticket.lock().unwrap() = None;
+        *self.connected_ticket.lock().unwrap() = None;
         *self.child.lock().unwrap() = Some(child);
 
         let me = self.clone();
@@ -89,19 +105,28 @@ impl ServerProc {
                 if let Some(rest) = line.strip_prefix("addr:") {
                     let raw = rest.trim();
                     *me.addr.lock().unwrap() = Some(raw.to_string());
-                    // Build a self-connect ticket: {addr: <parsed>, pin: ""}.
+                    // Self-connect ticket without a pin; enough once our
+                    // endpoint id is on the server allowlist.
                     if let Ok(addr) = serde_json::from_str::<serde_json::Value>(raw) {
                         *me.connected_ticket.lock().unwrap() =
-                            Some(json!({ "addr": addr, "pin": "" }).to_string());
+                            Some(json!({ "addr": addr, "pin": null }).to_string());
                     }
                 }
                 if let Some(rest) = line.strip_prefix("pairing ticket (QR payload):") {
-                    *me.ticket.lock().unwrap() = Some(rest.trim().to_string());
+                    let raw = rest.trim().to_string();
+                    *me.ticket.lock().unwrap() = Some(raw.clone());
+                    // The ticket's pin lets the built-in client pair_hello
+                    // itself while the pairing window is open.
+                    *me.connected_ticket.lock().unwrap() = Some(raw.clone());
+                    let _ = app.emit("pairing-ticket", raw);
                 }
                 let _ = app.emit("server-event", &line);
             }
-            // Process exited — clear running state.
+            // Process exited — clear runtime state.
             *me.child.lock().unwrap() = None;
+            *me.pairing.lock().unwrap() = false;
+            *me.ticket.lock().unwrap() = None;
+            *me.connected_ticket.lock().unwrap() = None;
             let _ = app.emit("server-event", "exited");
         });
         Ok(())
@@ -113,6 +138,7 @@ impl ServerProc {
         }
         *self.pairing.lock().unwrap() = false;
         *self.ticket.lock().unwrap() = None;
+        *self.connected_ticket.lock().unwrap() = None;
         Ok(())
     }
 }
