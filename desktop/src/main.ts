@@ -152,7 +152,7 @@ async function openSession(id: string) {
 }
 
 async function openExternalTail(ref: string) {
-  $("session-title").textContent = ref.split("/").pop();
+  $("session-title").textContent = ref.split("/").pop() ?? ref;
   $("acp-log").textContent = "";
   $("perm-box").style.display = "none";
   $("session-view").style.display = "";
