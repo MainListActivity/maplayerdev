@@ -17,6 +17,7 @@ use std::sync::Arc;
 
 const MAX_LINE: usize = 1 << 20;
 
+#[derive(Clone)]
 pub struct Server {
     pub endpoint: Endpoint,
     pub config: Config,
@@ -52,6 +53,9 @@ impl Server {
             .bind()
             .await
             .context("bind iroh endpoint")?;
+        // Materialize the launcher token so same-host clients can read it
+        // as soon as the endpoint is up.
+        cfg.local_token().await?;
         Ok(Self {
             endpoint,
             profiles: Arc::new(ProfileManager::new(&cfg)),
@@ -99,7 +103,7 @@ impl Server {
                     continue;
                 }
             };
-            let server = self.clone_ref();
+            let server = self.clone();
             tokio::spawn(async move {
                 match accepting.await {
                     Ok(conn) => server.handle_conn(conn).await,
@@ -110,35 +114,18 @@ impl Server {
         Ok(())
     }
 
-    fn clone_ref(&self) -> Self {
-        Self {
-            endpoint: self.endpoint.clone(),
-            config: Config {
-                root: self.config.root.clone(),
-                allowlist_path: self.config.allowlist_path.clone(),
-                key_path: self.config.key_path.clone(),
-                profiles_root: self.config.profiles_root.clone(),
-                config_path: self.config.config_path.clone(),
-            },
-            sessions: self.sessions.clone(),
-            profiles: self.profiles.clone(),
-            pairing: self.pairing.clone(),
-        }
-    }
-
     async fn handle_conn(&self, conn: Connection) {
+        // No connection-level gate: unauthorized endpoints may reach stream
+        // dispatch, where every method except pair_hello returns -32001.
+        // pair_hello itself is gated by the pairing PIN or the local
+        // launcher token, so this is not an auth bypass — it exists so the
+        // same-host launcher can pair against a `serve` daemon whose window
+        // never opens.
         let remote = conn.remote_id();
-        let allowed = self.config.is_allowed(&remote).await;
-        let pairing_open = self.pairing.open.load(Ordering::SeqCst);
-        if !allowed && !pairing_open {
-            tracing::warn!(%remote, "reject: not in allowlist");
-            conn.close(1u8.into(), b"unauthorized");
-            return;
-        }
         loop {
             match conn.accept_bi().await {
                 Ok((send, recv)) => {
-                    let server = self.clone_ref();
+                    let server = self.clone();
                     tokio::spawn(async move {
                         // Re-check per stream: a client that paired on this
                         // connection is authorized from its next stream on.
@@ -210,6 +197,7 @@ impl Server {
             "maplayer/sessions",
             "maplayer/session_new",
             "maplayer/session_kill",
+            "maplayer/session_tail",
             "maplayer/profiles",
             "maplayer/profile_new",
             "maplayer/profile_default",
@@ -252,6 +240,12 @@ impl Server {
                 let p: SessionKillParams = serde_json::from_value(params)?;
                 self.sessions.kill(&p.session_id).await.map(|_| json!({}))
             }
+            "maplayer/session_tail" => {
+                let p: SessionTailParams = serde_json::from_value(params)?;
+                let (lines, offset) =
+                    discovery::tail_rollout(&p.reference, p.lines.unwrap_or(50).min(500))?;
+                Ok(serde_json::to_value(SessionTailResult { lines, offset })?)
+            }
             "maplayer/profiles" => {
                 let profiles = self.profiles.list().await?;
                 let default = self.config.server_config().await.default_profile;
@@ -267,9 +261,7 @@ impl Server {
                 self.profiles
                     .codex_home(Some(&p.name), &self.config)
                     .await?;
-                let mut cfg = self.config.server_config().await;
-                cfg.default_profile = Some(p.name);
-                self.config.save_server_config(&cfg).await?;
+                self.config.set_default_profile(&p.name).await?;
                 Ok(json!({}))
             }
             _ => unreachable!("method list checked in dispatch"),
@@ -279,16 +271,29 @@ impl Server {
     async fn pair_hello(&self, remote: EndpointId, params: Value) -> Result<Value> {
         let p: PairHelloParams = serde_json::from_value(params)?;
         if !self.pairing.check(&p.pin) {
-            bail!("pairing closed or bad pin");
+            // Same-host launcher authenticates with the local token instead
+            // of the pairing PIN, so it never consumes the one-shot window.
+            self.check_local_token(&p.pin).await?;
+        } else {
+            // One window, one client: close so the PIN can't be reused.
+            self.pairing.close();
         }
         self.config.allow(&remote, p.label).await?;
-        // One window, one client: close so the PIN can't be reused.
-        self.pairing.close();
         tracing::info!(%remote, "paired new client");
         Ok(serde_json::to_value(PairHelloResult {
             server_id: self.endpoint_id().to_string(),
             name: "maplayer-server".into(),
         })?)
+    }
+
+    /// Constant-time-ish check of the local launcher token stored under
+    /// ~/.maplayer/local_token (0600, same user only).
+    async fn check_local_token(&self, pin: &str) -> Result<()> {
+        let token = self.config.local_token().await?;
+        if token.is_empty() || token != pin {
+            bail!("pairing closed or bad pin");
+        }
+        Ok(())
     }
 }
 

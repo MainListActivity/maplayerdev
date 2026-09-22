@@ -23,6 +23,7 @@ fn test_config(dir: &Path) -> Config {
         key_path: dir.join("secret_key"),
         profiles_root: dir.join("profiles"),
         config_path: dir.join("config.json"),
+        local_token_path: dir.join("local_token"),
     }
 }
 
@@ -118,25 +119,14 @@ async fn acp_attach(conn: &Connection, session_id: &str) -> (SendStream, RecvStr
     (send, recv)
 }
 
-/// A client that is not allowlisted must not get a usable stream while no
-/// pairing window is open (the QUIC handshake may succeed, then the server
-/// closes the connection).
-async fn assert_unauthorized(addr: &iroh::EndpointAddr, tag: &str) {
+/// A client that is not allowlisted connects fine but every method except
+/// pair_hello answers -32001 (per-stream authorization).
+async fn assert_unauthorized(addr: &iroh::EndpointAddr, tag: &str) -> (Endpoint, Connection) {
     let ep = new_endpoint().await;
-    let res = tokio::time::timeout(Duration::from_secs(10), async {
-        let conn = ep.connect(addr.clone(), ALPN).await?;
-        let (mut send, mut recv) = conn.open_bi().await?;
-        send.write_all(b"{\"kind\":\"rpc\",\"v\":1}\n").await?;
-        send.write_all(b"{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"maplayer/ping\"}\n")
-            .await?;
-        let _ = read_line(&mut recv).await?;
-        anyhow::Ok(())
-    })
-    .await;
-    if let Ok(Ok(())) = res {
-        panic!("unauthorized endpoint got a working stream ({tag})");
-    }
-    ep.close().await;
+    let conn = ep.connect(addr.clone(), ALPN).await.expect("connect");
+    let e = rpc_err(&conn, "maplayer/ping", json!({})).await;
+    assert_eq!(e["code"], -32001, "unauthorized ping accepted ({tag})");
+    (ep, conn)
 }
 
 /// Read lines until `want` have arrived or the timeout hits.
@@ -171,8 +161,11 @@ async fn wire_end_to_end() {
 
     let client = new_endpoint().await;
 
-    // --- Unauthorized outside a pairing window: connection is rejected ---
-    assert_unauthorized(&addr, "before pairing").await;
+    // --- Unauthorized outside a pairing window: methods refused ---
+    let (_rogue_ep, rogue) = assert_unauthorized(&addr, "before pairing").await;
+    // pair_hello with a bad PIN fails too.
+    let e = rpc_err(&rogue, "maplayer/pair_hello", json!({"pin": "000000"})).await;
+    assert!(e["message"].as_str().unwrap().contains("pin"), "{e}");
 
     // --- Pairing: bad PIN is a JSON-RPC error, good PIN pairs ---
     server.open_pairing(PIN.into());
@@ -191,7 +184,22 @@ async fn wire_end_to_end() {
     // client, and a brand-new unauthorized endpoint is refused again.
     let e = rpc_err(&conn, "maplayer/pair_hello", json!({"pin": PIN})).await;
     assert!(e["message"].as_str().unwrap().contains("closed"), "{e}");
-    assert_unauthorized(&addr, "after pairing closed").await;
+    let _closed_ep = assert_unauthorized(&addr, "after pairing closed").await;
+
+    // The same-host launcher pairs via ~/.maplayer/local_token instead of the
+    // PIN — works even with the pairing window closed.
+    let token = std::fs::read_to_string(dir.join("local_token")).unwrap();
+    let launcher = new_endpoint().await;
+    let lconn = launcher.connect(addr.clone(), ALPN).await.expect("connect");
+    let r = rpc_ok(
+        &lconn,
+        "maplayer/pair_hello",
+        json!({"pin": token.trim(), "label": "launcher"}),
+    )
+    .await;
+    assert_eq!(r["server_id"], server_id);
+    let r = rpc_ok(&lconn, "maplayer/ping", json!({})).await;
+    assert_eq!(r["server_id"], server_id);
 
     // --- ping ---
     let r = rpc_ok(&conn, "maplayer/ping", json!({})).await;
@@ -304,6 +312,33 @@ async fn wire_end_to_end() {
     let line = read_line(&mut bad_recv).await.expect("error line");
     let v: Value = serde_json::from_slice(&line).unwrap();
     assert_eq!(v["error"], "session not found");
+
+    // --- session_tail: last lines of a codex rollout file ---
+    let codex_dir = dir.join(".codex/sessions/2026/09");
+    std::fs::create_dir_all(&codex_dir).unwrap();
+    // tail_rollout is restricted to ~/.codex — point the test HOME at dir.
+    let orig_home = std::env::var_os("HOME");
+    std::env::set_var("HOME", &dir);
+    let roll = codex_dir.join("rollout-test.jsonl");
+    std::fs::write(&roll, "l1\nl2\nl3\nl4\n").unwrap();
+    let r = rpc_ok(
+        &conn,
+        "maplayer/session_tail",
+        json!({"reference": roll.to_string_lossy(), "lines": 2}),
+    )
+    .await;
+    assert_eq!(r["lines"], json!(["l3", "l4"]));
+    let e = rpc_err(
+        &conn,
+        "maplayer/session_tail",
+        json!({"reference": "/etc/passwd"}),
+    )
+    .await;
+    assert!(e["message"].as_str().unwrap().contains("codex"), "{e}");
+    match orig_home {
+        Some(h) => std::env::set_var("HOME", h),
+        None => std::env::remove_var("HOME"),
+    }
 
     // --- session_kill ---
     rpc_ok(

@@ -118,3 +118,9 @@ data class ProfileNewResult(
     @SerialName("codex_home") val codexHome: String,
     val login: LoginInstruction,
 )
+
+@Serializable
+data class SessionTailResult(
+    val lines: List<String> = emptyList(),
+    val offset: Long = 0,
+)

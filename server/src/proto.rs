@@ -29,8 +29,6 @@ pub struct SessionNewParams {
     #[serde(default)]
     pub profile: Option<String>,
     pub cwd: String,
-    #[serde(default)]
-    pub mode: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -41,6 +39,22 @@ pub struct SessionNewResult {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct SessionKillParams {
     pub session_id: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct SessionTailParams {
+    /// Absolute path of the external session file (from sessions.external.ref).
+    pub reference: String,
+    /// How many trailing lines to return (default 50, max 500).
+    #[serde(default)]
+    pub lines: Option<usize>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct SessionTailResult {
+    pub lines: Vec<String>,
+    /// Byte offset the tail starts at; pass back to resume later.
+    pub offset: u64,
 }
 
 #[derive(Debug, Serialize, Deserialize)]

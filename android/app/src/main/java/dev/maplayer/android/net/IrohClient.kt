@@ -16,6 +16,7 @@ import kotlinx.serialization.json.put
 
 private val ALPN = "maplayer/1".toByteArray()
 private const val READ_CHUNK = 64u * 1024u
+private const val MAX_LINE = 1 shl 20 // 1 MiB, mirrors the server cap
 
 /**
  * Owns the client's iroh endpoint and speaks the maplayer wire protocol.
@@ -69,7 +70,10 @@ class IrohClient(context: Context) {
             val req = RpcRequest(id = idCounter.incrementAndGet(), method = method, params = params)
             send.writeAll(line(wireJson.encodeToString(RpcRequest.serializer(), req)))
             send.finish()
-            val parsed = wireJson.decodeFromString(RpcResponse.serializer(), readLine(stream))
+            val parsed = wireJson.decodeFromString(
+                RpcResponse.serializer(),
+                AcpStream(stream).readLine(),
+            )
             parsed.error?.let { throw RpcException(it.code, it.message) }
             return parsed.result ?: JsonObject(emptyMap())
         } finally {
@@ -81,12 +85,25 @@ class IrohClient(context: Context) {
      * Open an ACP passthrough stream to a managed session. The caller then
      * exchanges newline-delimited ACP JSON-RPC frames on the returned stream.
      */
-    suspend fun openAcp(sessionId: String): BiStream {
+    suspend fun openAcp(sessionId: String): AcpStream {
         val conn = connection()
         val stream = conn.openBi()
         stream.send().writeAll(header("acp", sessionId))
-        return stream
+        return AcpStream(stream)
     }
+
+    /** Trailing lines of an external session file (codex rollout jsonl). */
+    suspend fun sessionTail(reference: String, lines: Int = 80): SessionTailResult =
+        wireJson.decodeFromJsonElement(
+            SessionTailResult.serializer(),
+            rpc(
+                "maplayer/session_tail",
+                buildJsonObject {
+                    put("reference", reference)
+                    put("lines", lines)
+                },
+            ),
+        )
 
     /**
      * First contact: connect with a scanned ticket + PIN, run pair_hello,
@@ -153,25 +170,40 @@ class IrohClient(context: Context) {
 
     private fun line(text: String): ByteArray = (text + "\n").toByteArray()
 
-    /**
-     * Read one newline-terminated line from a stream. ACP streams stay open;
-     * RPC streams end after one line, so this also serves full-response reads.
-     */
-    suspend fun readLine(stream: BiStream): String {
-        val out = StringBuilder()
+    class RpcException(val code: Int, override val message: String) : Exception("rpc $code: $message")
+}
+
+/**
+ * Buffered reader/writer over a BiStream. Keeps leftover bytes between
+ * readLine calls — required on ACP streams where one QUIC read can carry
+ * several newline-terminated frames — and enforces the 1 MiB line cap.
+ */
+class AcpStream internal constructor(private val stream: BiStream) {
+    private var pending = ByteArray(0)
+
+    /** Read one line without the trailing newline; empty string on EOF. */
+    suspend fun readLine(): String {
         while (true) {
-            val chunk = stream.recv().read(READ_CHUNK)
-            if (chunk.isEmpty()) break
-            val text = chunk.decodeToString()
-            val nl = text.indexOf('\n')
+            val nl = pending.indexOf('\n'.code.toByte())
             if (nl >= 0) {
-                out.append(text.substring(0, nl))
-                break
+                val line = pending.copyOfRange(0, nl).decodeToString()
+                pending = pending.copyOfRange(nl + 1, pending.size)
+                return line
             }
-            out.append(text)
+            if (pending.size > MAX_LINE) throw RpcException(-32000, "line too long")
+            val chunk = stream.recv().read(READ_CHUNK)
+            if (chunk.isEmpty()) {
+                val line = pending.decodeToString()
+                pending = ByteArray(0)
+                return line
+            }
+            pending += chunk
         }
-        return out.toString()
     }
 
-    class RpcException(val code: Int, override val message: String) : Exception("rpc $code: $message")
+    suspend fun writeLine(text: String) {
+        stream.send().writeAll((text + "\n").toByteArray())
+    }
+
+    fun close() = stream.close()
 }

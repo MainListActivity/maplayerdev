@@ -68,12 +68,21 @@ impl ServerProc {
         }
     }
 
-    /// The ticket the in-process client uses to reach its own server. While
-    /// the pairing window is open this is the full printed ticket (pin
-    /// included, so the client can `pair_hello` itself onto the allowlist);
-    /// otherwise just `{addr, pin: null}` for an already-allowlisted client.
+    /// The ticket the in-process client uses to reach its own server:
+    /// `{addr, pin}` where pin is the launcher token from
+    /// `~/.maplayer/local_token` — accepted by `pair_hello` without
+    /// consuming the one-shot pairing window reserved for remote devices.
     pub fn connected_ticket(&self) -> Option<String> {
         self.connected_ticket.lock().unwrap().clone()
+    }
+
+    /// ~/.maplayer/local_token, written by the server at bind time.
+    fn local_token() -> Option<String> {
+        let path = dirs::home_dir()?.join(".maplayer/local_token");
+        std::fs::read_to_string(path)
+            .ok()
+            .map(|t| t.trim().to_string())
+            .filter(|t| !t.is_empty())
     }
 
     pub async fn start(self: &Arc<Self>, app: &AppHandle, pair: bool) -> Result<()> {
@@ -105,19 +114,18 @@ impl ServerProc {
                 if let Some(rest) = line.strip_prefix("addr:") {
                     let raw = rest.trim();
                     *me.addr.lock().unwrap() = Some(raw.to_string());
-                    // Self-connect ticket without a pin; enough once our
-                    // endpoint id is on the server allowlist.
+                    // Self-connect ticket: pin is the launcher token, so the
+                    // built-in client authorizes itself without touching the
+                    // phone-facing pairing window.
                     if let Ok(addr) = serde_json::from_str::<serde_json::Value>(raw) {
-                        *me.connected_ticket.lock().unwrap() =
-                            Some(json!({ "addr": addr, "pin": null }).to_string());
+                        *me.connected_ticket.lock().unwrap() = Some(
+                            json!({ "addr": addr, "pin": Self::local_token() }).to_string(),
+                        );
                     }
                 }
                 if let Some(rest) = line.strip_prefix("pairing ticket (QR payload):") {
                     let raw = rest.trim().to_string();
                     *me.ticket.lock().unwrap() = Some(raw.clone());
-                    // The ticket's pin lets the built-in client pair_hello
-                    // itself while the pairing window is open.
-                    *me.connected_ticket.lock().unwrap() = Some(raw.clone());
                     let _ = app.emit("pairing-ticket", raw);
                 }
                 let _ = app.emit("server-event", &line);

@@ -14,6 +14,7 @@ import androidx.compose.material3.MenuAnchorType
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import dev.maplayer.android.net.ManagedSession
 import kotlinx.coroutines.launch
 
@@ -27,6 +28,8 @@ fun SessionsScreen(
 ) {
     val scope = rememberCoroutineScope()
     var showNew by remember { mutableStateOf(false) }
+    var tailTitle by remember { mutableStateOf<String?>(null) }
+    var tailLines by remember { mutableStateOf<List<String>>(emptyList()) }
 
     LaunchedEffect(Unit) { state.refreshSessions() }
 
@@ -71,12 +74,40 @@ fun SessionsScreen(
             item { SectionHeader("External (read-only)") }
             items(state.sessions?.external.orEmpty()) { s ->
                 ListItem(
+                    modifier = Modifier.clickable {
+                        scope.launch {
+                            tailTitle = s.title ?: s.reference
+                            tailLines = try {
+                                state.client.sessionTail(s.reference).lines
+                            } catch (e: Exception) {
+                                listOf("error: ${e.message}")
+                            }
+                        }
+                    },
                     headlineContent = { Text(s.title ?: s.reference) },
                     supportingContent = {
                         Text("${s.provider} · ${s.detail} · ${if (s.alive) "running" else "idle"}")
                     },
                 )
             }
+        }
+        tailTitle?.let { title ->
+            AlertDialog(
+                onDismissRequest = { tailTitle = null },
+                confirmButton = { TextButton(onClick = { tailTitle = null }) { Text("Close") } },
+                title = { Text(title) },
+                text = {
+                    LazyColumn {
+                        items(tailLines) { l ->
+                            Text(
+                                l,
+                                fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                                fontSize = 10.sp,
+                            )
+                        }
+                    }
+                },
+            )
         }
         if (showNew) {
             NewSessionSheet(state, onClose = { showNew = false }) { sessionId ->

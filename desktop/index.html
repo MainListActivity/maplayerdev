@@ -43,6 +43,26 @@
       <h3 class="muted">External (read-only)</h3>
       <div id="external"></div>
     </section>
+    <section id="session-view" style="display:none">
+      <h2>Session <span id="session-title" class="muted"></span></h2>
+      <div class="row">
+        <button id="session-cancel" class="secondary">Cancel turn</button>
+        <button id="session-kill" class="secondary">Kill</button>
+        <button id="session-close" class="secondary">Close view</button>
+      </div>
+      <div id="perm-box" style="display:none; margin-top: 8px"></div>
+      <pre id="acp-log" style="max-height: 300px; overflow-y: auto"></pre>
+      <div class="row">
+        <input id="prompt" placeholder="Prompt text (sent as session/prompt)" style="flex:1; background:#0d0f12; border:1px solid #262c35; border-radius:6px; color:#e6e6e6; padding:8px" />
+        <button id="prompt-send">Send</button>
+      </div>
+      <details class="muted"><summary>Raw frame</summary>
+        <div class="row">
+          <input id="raw-frame" placeholder='{"jsonrpc":"2.0",...}' style="flex:1; background:#0d0f12; border:1px solid #262c35; border-radius:6px; color:#e6e6e6; padding:8px" />
+          <button id="raw-send" class="secondary">Send raw</button>
+        </div>
+      </details>
+    </section>
     <section>
       <h2>Profiles</h2>
       <div class="row">

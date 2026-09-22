@@ -76,7 +76,7 @@ pub struct SessionManager {
 }
 
 /// What the spawn would run, for error messages and the stub override.
-fn spawn_command(
+fn build_command(
     params: &SessionNewParams,
     codex_home: Option<std::path::PathBuf>,
 ) -> Result<Command> {
@@ -125,7 +125,7 @@ impl SessionManager {
         profiles: &ProfileManager,
     ) -> Result<Arc<AcpSession>> {
         let codex_home = profiles.codex_home(params.profile.as_deref(), cfg).await?;
-        let mut cmd = spawn_command(&params, codex_home)?;
+        let mut cmd = build_command(&params, codex_home)?;
         let mut child = cmd.spawn().with_context(|| {
             format!(
                 "spawn {} agent for provider '{}' failed (missing binary?)",
@@ -151,7 +151,7 @@ impl SessionManager {
             provider: params.provider.clone(),
             profile: params.profile.clone(),
             cwd: params.cwd.clone(),
-            created_at: chrono_now(),
+            created_at: unix_now(),
             pid,
             stdin_tx,
             kill_tx,
@@ -349,7 +349,7 @@ impl SessionManager {
     }
 }
 
-fn chrono_now() -> String {
+fn unix_now() -> String {
     // Avoid pulling chrono; RFC3339-ish from SystemTime.
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -374,6 +374,7 @@ mod tests {
             key_path: dir.join("secret_key"),
             profiles_root: dir.join("profiles"),
             config_path: dir.join("config.json"),
+            local_token_path: dir.join("local_token"),
         }
     }
 
@@ -382,7 +383,6 @@ mod tests {
             provider: provider.into(),
             profile: None,
             cwd: cwd.to_string_lossy().into(),
-            mode: None,
         }
     }
 

@@ -26,29 +26,34 @@ stream are not length-checked by the server — they pass through verbatim.
 
 ## Authorization
 
-The server keeps an allowlist of endpoint IDs (`~/.maplayer/allowlist.json`).
+The server keeps an allowlist of endpoint IDs (`~/.maplayer/allowlist.json`,
+shaped `{ "endpoints": { "<id>": "<label?>" } }`).
 
-- Remote endpoint **not allowlisted** and **no pairing window open**: the
-  connection itself is refused at accept time (close code `1`,
-  `"unauthorized"`); no streams are ever handled.
-- Remote endpoint **not allowlisted** but **a pairing window is open**: the
-  connection is accepted, and on `rpc` streams every method except
-  `maplayer/pair_hello` is rejected with error `-32001`. An `acp` stream from
-  an unauthorized endpoint fails immediately.
+- Remote endpoint **not allowlisted**: the connection is accepted but every
+  `rpc` method except `maplayer/pair_hello` is rejected with error `-32001`,
+  and an `acp` stream fails immediately. pair_hello only succeeds with a
+  valid pairing PIN (while a window is open) or the local launcher token.
 - Remote endpoint **allowlisted**: the full control-plane surface is
-  reachable, plus `acp` session attach.
+  reachable, plus `acp` session attach. Authorization is re-checked per
+  stream, so a client that pairs mid-connection is authorized from its next
+  stream on.
+
+**Local launcher token**: the server writes `~/.maplayer/local_token` (0600)
+when it binds. A same-host client that presents that token as the `pin` in
+`pair_hello` is added to the allowlist *without* consuming the pairing
+window — the desktop app uses this to manage its own daemon while leaving
+the one-shot window free for a phone.
 
 ## Errors
 
 RPC responses carry the usual `{"jsonrpc": "2.0", "id", "error": {code, message}}`
-envelope. Two codes are in use:
+envelope. Three codes are in use:
 
 | Code | Meaning |
 | --- | --- |
 | `-32001` | Unauthorized: a non-allowlisted endpoint called a method other than `maplayer/pair_hello`. |
-| `-32000` | Any method-level failure. The message is the server-side error text — e.g. `method not found`, `pairing closed or bad pin`, `unknown provider`, `unknown profile`, `session not found`. |
-
-Note: unknown methods return `-32000`, not the JSON-RPC-standard `-32601`.
+| `-32000` | Any method-level failure. The message is the server-side error text — e.g. `pairing closed or bad pin`, `unknown provider`, `unknown profile`, `session not found`. |
+| `-32601` | Method not found (the JSON-RPC-standard code). |
 
 ## Control-plane methods (`maplayer/*`)
 
@@ -58,8 +63,9 @@ All are JSON-RPC 2.0 over an `rpc` stream.
 | --- | --- | --- |
 | `maplayer/pair_hello` | `{ pin: string, label?: string }` | `{ server_id: string, name: string }` |
 | `maplayer/sessions` | `{}` | `{ managed: ManagedSession[], external: ExternalSession[] }` |
-| `maplayer/session_new` | `{ provider: "codex" \| "cursor", profile?: string, cwd: string, mode?: string }` | `{ session_id: string }` |
+| `maplayer/session_new` | `{ provider: "codex" \| "cursor", profile?: string, cwd: string }` | `{ session_id: string }` |
 | `maplayer/session_kill` | `{ session_id: string }` | `{}` |
+| `maplayer/session_tail` | `{ reference: string, lines?: number }` | `{ lines: string[], offset: number }` |
 | `maplayer/profiles` | `{}` | `{ profiles: Profile[], default: string \| null }` |
 | `maplayer/profile_new` | `{ name: string, credential: "chatgpt" \| "api-key" }` | `{ name: string, codex_home: string, login: LoginInstruction }` |
 | `maplayer/profile_default` | `{ name: string }` | `{}` |
@@ -67,13 +73,17 @@ All are JSON-RPC 2.0 over an `rpc` stream.
 
 Method notes:
 
-- `pair_hello`: succeeds only while a pairing window is open and `pin`
-  matches; on success the caller's endpoint ID is added to the allowlist
-  (with `label` recorded when given).
+- `pair_hello`: succeeds with the pairing `pin` while a window is open
+  (one success closes the window), or with the local launcher token at any
+  time; on success the caller's endpoint ID is added to the allowlist (with
+  `label` recorded when given).
+- `session_tail`: `reference` must be an external Codex rollout file
+  (`rollout-*.jsonl` under `~/.codex/sessions`); anything else is refused.
+  Returns the last `lines` (default 50, max 500) plus the byte offset the
+  tail starts at.
 - `session_new`: `provider` is one of `codex` or `cursor`; anything else is
   rejected. When `profile` is omitted the server's default profile is used,
   falling back to the agent's own `CODEX_HOME` (typically `~/.codex`).
-  `mode` is accepted but currently unused by the server.
 - `profile_new`: `name` must be 1–64 chars of `[a-zA-Z0-9_-]`.
 
 Types:
@@ -114,5 +124,5 @@ out-of-band input (paste / QR payload), not an RPC message:
 ```
 
 `addr` is the server's iroh `EndpointAddr`; `pin` is the secret the client
-sends in `pair_hello`. The pairing window — and thus the PIN's validity —
-lasts only as long as that `pair` process runs.
+sends in `pair_hello`. The pairing window admits **exactly one client**: it
+closes on the first successful PIN pair, or when that `pair` process exits.

@@ -30,7 +30,7 @@ enum Cmd {
     /// Allow an endpoint id without pairing (writes allowlist).
     Allow {
         /// Endpoint id of the client to authorize.
-        node: String,
+        endpoint: String,
     },
 }
 
@@ -94,9 +94,7 @@ async fn main() -> Result<()> {
                 }
                 ProfileCmd::Default { name } => {
                     pm.codex_home(Some(&name), &cfg).await?;
-                    let mut sc = cfg.server_config().await;
-                    sc.default_profile = Some(name);
-                    cfg.save_server_config(&sc).await?;
+                    cfg.set_default_profile(&name).await?;
                     println!("ok");
                 }
             }
@@ -105,8 +103,8 @@ async fn main() -> Result<()> {
             let external = discovery::external_sessions();
             println!("{}", serde_json::to_string_pretty(&external)?);
         }
-        Cmd::Allow { node } => {
-            let id: iroh::EndpointId = node.parse()?;
+        Cmd::Allow { endpoint } => {
+            let id: iroh::EndpointId = endpoint.parse()?;
             cfg.allow(&id, None).await?;
             println!("allowed {id}");
         }

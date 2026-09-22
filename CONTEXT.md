@@ -72,14 +72,22 @@ The profile applied when a new-session request omits `profile`.
 
 **Pairing**:
 The one-time ceremony that adds a client's endpoint ID to the server's
-allowlist. Opened explicitly on the host; the window stays open for as long
-as that `maplayer-server pair` process runs.
+allowlist. Opened explicitly on the host; the window admits exactly one
+client, closing on the first successful `pair_hello` or when the `pair`
+daemon exits.
 _Avoid_: registration, enrollment
 
 **Pairing window**:
-The interval while the server accepts `pair_hello` calls from un-authorized
-endpoints. The only moment an unknown client can do anything.
+The interval while the server accepts PIN-based `pair_hello` calls from
+un-authorized endpoints. One-shot: admits the first client that proves the
+PIN, then closes.
 _Avoid_: pairing mode
+
+**Launcher token**:
+The shared secret in `~/.maplayer/local_token` (0600, same-user only) that
+authorizes a same-host client — the desktop app — via `pair_hello` without
+consuming the pairing window.
+_Avoid_: local secret, loopback auth
 
 **Ticket**:
 The JSON payload `{addr, pin}` the host displays during pairing. Carries
@@ -87,8 +95,9 @@ everything a client needs to reach and prove itself to the server.
 _Avoid_: QR code (a rendering of the ticket), invite
 
 **PIN**:
-The short-lived secret inside the ticket — it expires when the pairing
-daemon exits. Proof that the person pairing can see the host's screen.
+The single-use secret inside the ticket — expires when the window closes
+(first successful pair, or the pairing daemon exits). Proof that the person
+pairing can see the host's screen.
 _Avoid_: code, token
 
 **Allowlist**:

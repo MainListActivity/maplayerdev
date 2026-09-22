@@ -2,7 +2,7 @@
 //! wire protocol as Android — one protocol, two transports of reach.
 
 use anyhow::{bail, Context, Result};
-use iroh::endpoint::Connection;
+use iroh::endpoint::{Connection, RecvStream, SendStream};
 use iroh::{Endpoint, EndpointAddr, SecretKey};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -23,7 +23,6 @@ enum StreamHeader {
     Rpc {
         v: u32,
     },
-    #[allow(dead_code)]
     Acp {
         v: u32,
         session_id: String,
@@ -72,11 +71,11 @@ impl Client {
     }
 
     /// Connect to the server described by a ticket. If our endpoint id is
-    /// already on the server allowlist this is a plain connect. Otherwise —
-    /// the server has no implicit trust for the local client — we present
-    /// the ticket's pin via `maplayer/pair_hello` while the pairing window
-    /// is open, then reconnect: the server captures `allowed` per connection
-    /// at accept time, so the pre-pairing connection stays unauthorized.
+    /// already on the server allowlist this is a plain connect. Otherwise we
+    /// present the ticket's pin — the launcher token, which `pair_hello`
+    /// accepts without consuming the pairing window — then reconnect: the
+    /// server captures `allowed` per connection at accept time, so the
+    /// pre-pairing connection stays unauthorized.
     pub async fn connect(&self, ticket_json: &str) -> Result<()> {
         let ticket: Ticket = serde_json::from_str(ticket_json).context("bad ticket json")?;
         let conn = self
@@ -116,6 +115,23 @@ impl Client {
 
     async fn ping(&self, conn: &Connection) -> Result<Value> {
         rpc_on(conn, &self.next_id, "maplayer/ping", json!({})).await
+    }
+
+    /// Attach to a managed session's ACP bridge: backlog replays on the
+    /// returned recv stream, writes on send forward to the agent's stdin.
+    pub async fn open_acp(&self, session_id: &str) -> Result<(SendStream, RecvStream)> {
+        let conn = {
+            let guard = self.conn.lock().await;
+            guard.clone().context("not connected to server")?
+        };
+        let (mut send, recv) = conn.open_bi().await?;
+        let header = serde_json::to_vec(&StreamHeader::Acp {
+            v: 1,
+            session_id: session_id.to_string(),
+        })?;
+        send.write_all(&header).await?;
+        send.write_all(b"\n").await?;
+        Ok((send, recv))
     }
 
     /// JSON-RPC over a fresh rpc stream.
