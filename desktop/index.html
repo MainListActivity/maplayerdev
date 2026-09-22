@@ -34,8 +34,22 @@
     </section>
     <section>
       <h2>Sessions</h2>
-      <div class="row"><button id="refresh" class="secondary">Refresh</button></div>
-      <pre id="sessions"></pre>
+      <div class="row">
+        <button id="refresh" class="secondary">Refresh</button>
+        <span id="sessions-status" class="muted"></span>
+      </div>
+      <h3 class="muted">Managed</h3>
+      <div id="managed"></div>
+      <h3 class="muted">External (read-only)</h3>
+      <div id="external"></div>
+    </section>
+    <section>
+      <h2>Profiles</h2>
+      <div class="row">
+        <button id="refresh-profiles" class="secondary">Refresh</button>
+        <span id="profiles-status" class="muted"></span>
+      </div>
+      <div id="profiles"></div>
     </section>
     <section>
       <h2>Server log</h2>
