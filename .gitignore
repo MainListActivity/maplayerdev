@@ -1,6 +1,7 @@
 target/
 node_modules/
 dist/
+desktop/src-tauri/binaries/
 .gradle/
 **/build/
 *.iml
