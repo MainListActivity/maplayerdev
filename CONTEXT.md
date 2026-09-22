@@ -72,7 +72,8 @@ The profile applied when a new-session request omits `profile`.
 
 **Pairing**:
 The one-time ceremony that adds a client's endpoint ID to the server's
-allowlist. Opened explicitly on the host, closes when it succeeds.
+allowlist. Opened explicitly on the host; the window stays open for as long
+as that `maplayer-server pair` process runs.
 _Avoid_: registration, enrollment
 
 **Pairing window**:
@@ -86,13 +87,14 @@ everything a client needs to reach and prove itself to the server.
 _Avoid_: QR code (a rendering of the ticket), invite
 
 **PIN**:
-The short-lived secret inside the ticket. Proof that the person pairing can
-see the host's screen.
+The short-lived secret inside the ticket — it expires when the pairing
+daemon exits. Proof that the person pairing can see the host's screen.
 _Avoid_: code, token
 
 **Allowlist**:
-The persisted set of endpoint IDs authorized to use every method except
-`pair_hello`. The only authorization mechanism.
+The persisted set of endpoint IDs authorized to use the full control plane;
+`pair_hello` is the only method reachable without being on it. The only
+authorization mechanism.
 _Avoid_: ACL, authorized keys
 
 **Control plane**:
