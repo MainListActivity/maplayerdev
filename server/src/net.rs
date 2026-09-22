@@ -35,7 +35,7 @@ impl PairingState {
         let guard = self.pin.lock().unwrap();
         self.open.load(Ordering::SeqCst) && guard.as_deref() == Some(pin)
     }
-    #[allow(dead_code)]
+    /// The window admits exactly one client: first successful pair closes it.
     fn close(&self) {
         self.open.store(false, Ordering::SeqCst);
         *self.pin.lock().unwrap() = None;
@@ -139,8 +139,10 @@ impl Server {
             match conn.accept_bi().await {
                 Ok((send, recv)) => {
                     let server = self.clone_ref();
-                    let allowed_now = allowed;
                     tokio::spawn(async move {
+                        // Re-check per stream: a client that paired on this
+                        // connection is authorized from its next stream on.
+                        let allowed_now = server.config.is_allowed(&remote).await;
                         if let Err(e) = server.handle_stream(remote, allowed_now, send, recv).await
                         {
                             tracing::debug!(%remote, "stream closed: {e}");
@@ -174,12 +176,20 @@ impl Server {
                 if !allowed {
                     bail!("unauthorized acp attach");
                 }
-                let session = self
-                    .sessions
-                    .get(&session_id)
-                    .await
-                    .context("session not found")?;
-                SessionManager::bridge_acp(session, send, recv).await?;
+                match self.sessions.get(&session_id).await {
+                    Some(session) => {
+                        SessionManager::bridge_acp(session, send, recv).await?;
+                    }
+                    None => {
+                        let line = serde_json::to_vec(&json!({
+                            "error": "session not found",
+                            "session_id": session_id,
+                        }))?;
+                        let _ = send.write_all(&line).await;
+                        let _ = send.write_all(b"\n").await;
+                        let _ = send.finish();
+                    }
+                }
             }
         }
         Ok(())
@@ -193,6 +203,19 @@ impl Server {
         // Pre-authorization surface: pair_hello only.
         if !allowed && method != "maplayer/pair_hello" {
             return err(id, -32001, "unauthorized");
+        }
+        const KNOWN: &[&str] = &[
+            "maplayer/ping",
+            "maplayer/pair_hello",
+            "maplayer/sessions",
+            "maplayer/session_new",
+            "maplayer/session_kill",
+            "maplayer/profiles",
+            "maplayer/profile_new",
+            "maplayer/profile_default",
+        ];
+        if !KNOWN.contains(&method) {
+            return err(id, -32601, "method not found");
         }
 
         match self.dispatch_result(remote, method, params).await {
@@ -249,7 +272,7 @@ impl Server {
                 self.config.save_server_config(&cfg).await?;
                 Ok(json!({}))
             }
-            _ => bail!("method not found"),
+            _ => unreachable!("method list checked in dispatch"),
         }
     }
 
@@ -259,6 +282,8 @@ impl Server {
             bail!("pairing closed or bad pin");
         }
         self.config.allow(&remote, p.label).await?;
+        // One window, one client: close so the PIN can't be reused.
+        self.pairing.close();
         tracing::info!(%remote, "paired new client");
         Ok(serde_json::to_value(PairHelloResult {
             server_id: self.endpoint_id().to_string(),
