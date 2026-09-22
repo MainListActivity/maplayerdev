@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Maplayer Desktop</title>
+  <style>
+    body { font-family: system-ui, sans-serif; background: #14161a; color: #e6e6e6; margin: 0; }
+    main { max-width: 860px; margin: 0 auto; padding: 24px; }
+    h1 { font-size: 20px; } h2 { font-size: 14px; color: #9ab; margin-top: 24px; }
+    button { background: #2d6cdf; color: #fff; border: 0; border-radius: 6px; padding: 8px 14px; cursor: pointer; }
+    button.secondary { background: #333a45; }
+    pre { background: #0d0f12; border: 1px solid #262c35; border-radius: 8px; padding: 12px; overflow-x: auto; font-size: 12px; }
+    .row { display: flex; gap: 8px; align-items: center; }
+    .muted { color: #7a828e; font-size: 12px; }
+    table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    td, th { text-align: left; padding: 6px 8px; border-bottom: 1px solid #262c35; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Maplayer Desktop</h1>
+    <section>
+      <h2>Server</h2>
+      <div class="row">
+        <button id="start-pair">Start with pairing</button>
+        <button id="start" class="secondary">Start</button>
+        <button id="stop" class="secondary">Stop</button>
+        <span id="status" class="muted">stopped</span>
+      </div>
+      <pre id="info"></pre>
+      <p class="muted">Pairing ticket (paste into the Android app or render as QR):</p>
+      <pre id="ticket"></pre>
+    </section>
+    <section>
+      <h2>Sessions</h2>
+      <div class="row"><button id="refresh" class="secondary">Refresh</button></div>
+      <pre id="sessions"></pre>
+    </section>
+    <section>
+      <h2>Server log</h2>
+      <pre id="log"></pre>
+    </section>
+  </main>
+  <script type="module" src="/src/main.ts"></script>
+</body>
+</html>
