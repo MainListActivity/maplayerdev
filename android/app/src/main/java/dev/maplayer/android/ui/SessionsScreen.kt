@@ -10,8 +10,8 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.*
+import androidx.compose.material3.MenuAnchorType
 import androidx.compose.runtime.*
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import dev.maplayer.android.net.ManagedSession
@@ -51,10 +51,10 @@ fun SessionsScreen(
             }
         },
     ) { pad ->
-        state.error?.let {
-            Text(it, Modifier.padding(16.dp), color = MaterialTheme.colorScheme.error)
-        }
         LazyColumn(Modifier.padding(pad).fillMaxSize()) {
+            state.error?.let { e ->
+                item { Text(e, Modifier.padding(16.dp), color = MaterialTheme.colorScheme.error) }
+            }
             item { SectionHeader("Managed (spawned via this server)") }
             items(state.sessions?.managed.orEmpty()) { s ->
                 ManagedRow(
@@ -154,7 +154,7 @@ private fun NewSessionSheet(state: AppState, onClose: () -> Unit, onCreated: (St
                         readOnly = true,
                         label = { Text("Codex profile (blank = default)") },
                         trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded) },
-                        modifier = Modifier.menuAnchor().fillMaxWidth(),
+                        modifier = Modifier.menuAnchor(MenuAnchorType.PrimaryNotEditable).fillMaxWidth(),
                     )
                     ExposedDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
                         names.forEach { n ->
