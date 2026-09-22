@@ -1,0 +1,129 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  desktop:
+    name: desktop (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+
+      - name: Install Tauri system deps (Ubuntu)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            libfuse2 \
+            patchelf
+
+      # Build the host daemon and stage it as a Tauri externalBin sidecar
+      # (desktop/src-tauri/binaries/maplayer-server-<target-triple>).
+      #
+      # Server binary resolution contract (desktop/src-tauri/src/server_proc.rs
+      # is owned by another component — do not edit it here):
+      #   1. $MAPLAYER_SERVER_BIN, when set.
+      #   2. The bundled sidecar resolved via the standard Tauri sidecar
+      #      lookup (bundle.externalBin in tauri.conf.json).
+      #   3. Dev-layout fallbacks already in server_proc.rs:
+      #      ../target/debug/maplayer-server, ../target/release/maplayer-server,
+      #      then maplayer-server on $PATH.
+      # Packaged builds must find the sidecar at step 2 when
+      # MAPLAYER_SERVER_BIN is unset.
+      - name: Build maplayer-server sidecar
+        run: |
+          cargo build --release -p maplayer-server
+          triple="$(rustc -vV | sed -n 's/^host: //p')"
+          mkdir -p desktop/src-tauri/binaries
+          cp "target/release/maplayer-server" "desktop/src-tauri/binaries/maplayer-server-${triple}"
+          chmod +x "desktop/src-tauri/binaries/maplayer-server-${triple}"
+          ls -la desktop/src-tauri/binaries/
+
+      - name: npm ci
+        working-directory: desktop
+        run: npm ci
+
+      # `npx tauri build` (not tauri-apps/tauri-action) so that artifacts are
+      # attached once, by the dedicated `release` job below, alongside the
+      # Android APK.
+      - name: tauri build
+        working-directory: desktop
+        run: npx tauri build
+
+      - name: Collect bundles
+        shell: bash
+        run: |
+          mkdir -p release-artifacts
+          for f in \
+            desktop/src-tauri/target/release/bundle/deb/*.deb \
+            desktop/src-tauri/target/release/bundle/rpm/*.rpm \
+            desktop/src-tauri/target/release/bundle/appimage/*.AppImage \
+            desktop/src-tauri/target/release/bundle/dmg/*.dmg; do
+            [ -e "$f" ] && cp "$f" release-artifacts/
+          done
+          ls -la release-artifacts/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: desktop-${{ matrix.os }}
+          path: release-artifacts/
+          if-no-files-found: error
+
+  android:
+    name: android (apk)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: android-actions/setup-android@v3
+      - uses: gradle/actions/setup-gradle@v4
+      # The repo now commits gradlew + gradle-wrapper.jar (generated via
+      # `gradle wrapper --gradle-version 8.14.3`). If the wrapper were ever
+      # absent, run `gradle wrapper` once locally and commit the output, or
+      # swap `./gradlew` below for `gradle assembleRelease` via setup-gradle.
+      - name: assembleRelease
+        working-directory: android
+        run: ./gradlew assembleRelease
+      - uses: actions/upload-artifact@v4
+        with:
+          name: android-apk
+          path: android/app/build/outputs/apk/release/*.apk
+          if-no-files-found: error
+
+  release:
+    name: github release
+    needs: [desktop, android]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: List release files
+        run: ls -la dist/
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          fail_on_unmatched_files: true

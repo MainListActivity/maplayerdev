@@ -21,6 +21,8 @@ android {
         release {
             isMinifyEnabled = false
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+            // CI ships debug-signed release APKs until a real signing config exists.
+            signingConfig = signingConfigs.getByName("debug")
         }
     }
 

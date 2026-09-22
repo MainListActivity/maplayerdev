@@ -1,0 +1,60 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+jobs:
+  server:
+    name: server (cargo workspace)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: cargo fmt
+        run: cargo fmt --check
+      - name: cargo clippy
+        run: cargo clippy -- -D warnings
+      - name: cargo test
+        run: cargo test
+
+  desktop:
+    name: desktop (vite client)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+      - name: npm ci
+        working-directory: desktop
+        run: npm ci
+      - name: typecheck
+        working-directory: desktop
+        run: npx tsc --noEmit
+
+  android:
+    name: android (gradle wrapper)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      # Wrapper jar check — skipped automatically when android/gradlew is absent.
+      - name: Gradle wrapper check
+        working-directory: android
+        run: |
+          if [ -f gradlew ]; then
+            ./gradlew --version
+          else
+            echo "no gradle wrapper committed; skipping check"
+          fi
