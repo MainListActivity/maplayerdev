@@ -7,9 +7,10 @@ Model: the server keeps a persistent **allowlist** of client endpoint IDs.
 Every incoming connection is checked; an un-authorized endpoint can reach
 only `maplayer/pair_hello`, and only while a **pairing window** is open.
 Pairing is initiated on the host (`maplayer-server pair`, or the desktop's
-"start with pairing" button), which mints a short-lived PIN and displays a
-ticket `{addr, pin}` — the client presents the PIN, the host records its
-endpoint ID, the window closes.
+"start with pairing" button), which mints a PIN and displays a ticket
+`{addr, pin}` — the client presents the PIN, the host records its endpoint
+ID. The pairing window stays open for the life of that daemon; the PIN is
+valid until it exits.
 
 Why this shape: endpoint IDs are the identity iroh already authenticates at
 the QUIC layer, so an allowlist of them is authorization with zero extra
