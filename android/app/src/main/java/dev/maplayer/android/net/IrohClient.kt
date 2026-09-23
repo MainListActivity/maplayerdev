@@ -15,7 +15,7 @@ import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 
 private val ALPN = "maplayer/1".toByteArray()
-private const val READ_CHUNK = 64u * 1024u
+private val READ_CHUNK = 64u * 1024u
 private const val MAX_LINE = 1024 * 1024 // 1 MiB, mirrors the server cap
 
 /**
