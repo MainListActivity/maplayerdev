@@ -50,6 +50,14 @@ jobs:
             libwebkit2gtk-4.1-dev \
             libayatana-appindicator3-dev \
             librsvg2-dev
+      # externalBin in tauri.conf.json requires the staged server binary to
+      # exist at build time; stage a debug build like release.yml does.
+      - name: Stage maplayer-server sidecar
+        run: |
+          cargo build -p maplayer-server
+          triple="$(rustc -vV | sed -n 's/^host: //p')"
+          mkdir -p desktop/src-tauri/binaries
+          cp "target/debug/maplayer-server" "desktop/src-tauri/binaries/maplayer-server-${triple}"
       # cargo check so src-tauri compile errors surface on PRs, not at release.
       - name: cargo check (src-tauri)
         working-directory: desktop/src-tauri
