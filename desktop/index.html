@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Maplayer Desktop</title>
+  <style>
+    body { font-family: system-ui, sans-serif; background: #14161a; color: #e6e6e6; margin: 0; }
+    main { max-width: 860px; margin: 0 auto; padding: 24px; }
+    h1 { font-size: 20px; } h2 { font-size: 14px; color: #9ab; margin-top: 24px; }
+    button { background: #2d6cdf; color: #fff; border: 0; border-radius: 6px; padding: 8px 14px; cursor: pointer; }
+    button.secondary { background: #333a45; }
+    pre { background: #0d0f12; border: 1px solid #262c35; border-radius: 8px; padding: 12px; overflow-x: auto; font-size: 12px; }
+    .row { display: flex; gap: 8px; align-items: center; }
+    .muted { color: #7a828e; font-size: 12px; }
+    table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    td, th { text-align: left; padding: 6px 8px; border-bottom: 1px solid #262c35; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Maplayer Desktop</h1>
+    <section>
+      <h2>Server</h2>
+      <div class="row">
+        <button id="start-pair">Start with pairing</button>
+        <button id="start" class="secondary">Start</button>
+        <button id="stop" class="secondary">Stop</button>
+        <span id="status" class="muted">stopped</span>
+      </div>
+      <pre id="info"></pre>
+      <p class="muted">Pairing ticket (paste into the Android app or render as QR):</p>
+      <pre id="ticket"></pre>
+    </section>
+    <section>
+      <h2>Sessions</h2>
+      <div class="row">
+        <button id="refresh" class="secondary">Refresh</button>
+        <span id="sessions-status" class="muted"></span>
+      </div>
+      <h3 class="muted">Managed</h3>
+      <div id="managed"></div>
+      <h3 class="muted">External (read-only)</h3>
+      <div id="external"></div>
+    </section>
+    <section id="session-view" style="display:none">
+      <h2>Session <span id="session-title" class="muted"></span></h2>
+      <div class="row">
+        <button id="session-cancel" class="secondary">Cancel turn</button>
+        <button id="session-kill" class="secondary">Kill</button>
+        <button id="session-close" class="secondary">Close view</button>
+      </div>
+      <div id="perm-box" style="display:none; margin-top: 8px"></div>
+      <pre id="acp-log" style="max-height: 300px; overflow-y: auto"></pre>
+      <div class="row">
+        <input id="prompt" placeholder="Prompt text (sent as session/prompt)" style="flex:1; background:#0d0f12; border:1px solid #262c35; border-radius:6px; color:#e6e6e6; padding:8px" />
+        <button id="prompt-send">Send</button>
+      </div>
+      <details class="muted"><summary>Raw frame</summary>
+        <div class="row">
+          <input id="raw-frame" placeholder='{"jsonrpc":"2.0",...}' style="flex:1; background:#0d0f12; border:1px solid #262c35; border-radius:6px; color:#e6e6e6; padding:8px" />
+          <button id="raw-send" class="secondary">Send raw</button>
+        </div>
+      </details>
+    </section>
+    <section>
+      <h2>Profiles</h2>
+      <div class="row">
+        <button id="refresh-profiles" class="secondary">Refresh</button>
+        <span id="profiles-status" class="muted"></span>
+      </div>
+      <div id="profiles"></div>
+    </section>
+    <section>
+      <h2>Server log</h2>
+      <pre id="log"></pre>
+    </section>
+  </main>
+  <script type="module" src="/src/main.ts"></script>
+</body>
+</html>
