@@ -49,12 +49,19 @@ jobs:
         with:
           distribution: temurin
           java-version: "17"
-      # Wrapper jar check — skipped automatically when android/gradlew is absent.
-      - name: Gradle wrapper check
+      - name: Android SDK packages
+        run: |
+          SDKMGR="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          [ -x "$SDKMGR" ] || SDKMGR="$(find "$ANDROID_HOME/cmdline-tools" -name sdkmanager | sort -V | tail -1)"
+          yes | "$SDKMGR" --install "platforms;android-35" "build-tools;35.0.0" >/dev/null
+          yes | "$SDKMGR" --licenses >/dev/null
+      - uses: gradle/actions/setup-gradle@v4
+      # Compile Kotlin on PRs so app code errors surface before release.
+      - name: Kotlin compile check
         working-directory: android
         run: |
           if [ -f gradlew ]; then
-            ./gradlew --version
+            ./gradlew compileReleaseKotlin
           else
             echo "no gradle wrapper committed; skipping check"
           fi

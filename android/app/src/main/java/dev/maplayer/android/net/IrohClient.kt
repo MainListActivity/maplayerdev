@@ -15,8 +15,8 @@ import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 
 private val ALPN = "maplayer/1".toByteArray()
-private const val READ_CHUNK = 64u * 1024u
-private const val MAX_LINE = 1 shl 20 // 1 MiB, mirrors the server cap
+private val READ_CHUNK = 64u * 1024u
+private const val MAX_LINE = 1024 * 1024 // 1 MiB, mirrors the server cap
 
 /**
  * Owns the client's iroh endpoint and speaks the maplayer wire protocol.
@@ -190,7 +190,7 @@ class AcpStream internal constructor(private val stream: BiStream) {
                 pending = pending.copyOfRange(nl + 1, pending.size)
                 return line
             }
-            if (pending.size > MAX_LINE) throw RpcException(-32000, "line too long")
+            if (pending.size > MAX_LINE) throw IrohClient.RpcException(-32000, "line too long")
             val chunk = stream.recv().read(READ_CHUNK)
             if (chunk.isEmpty()) {
                 val line = pending.decodeToString()
