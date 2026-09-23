@@ -39,6 +39,21 @@ jobs:
       - name: typecheck
         working-directory: desktop
         run: npx tsc --noEmit
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: desktop/src-tauri
+      - name: Install Tauri system deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev
+      # cargo check so src-tauri compile errors surface on PRs, not at release.
+      - name: cargo check (src-tauri)
+        working-directory: desktop/src-tauri
+        run: cargo check
 
   android:
     name: android (gradle wrapper)
