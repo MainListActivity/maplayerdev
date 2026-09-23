@@ -141,7 +141,8 @@ impl ServerProc {
     }
 
     pub async fn stop(&self) -> Result<()> {
-        if let Some(mut child) = self.child.lock().unwrap().take() {
+        let child = self.child.lock().unwrap().take();
+        if let Some(mut child) = child {
             child.kill().await?;
         }
         *self.pairing.lock().unwrap() = false;
