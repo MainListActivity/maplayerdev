@@ -97,7 +97,14 @@ jobs:
         with:
           distribution: temurin
           java-version: "17"
-      - uses: android-actions/setup-android@v3
+      # ubuntu-latest runners ship a preinstalled Android SDK at $ANDROID_HOME;
+      # android-actions/setup-android@v3 breaks on cmdline-tools 16.x (it tries
+      # `sdkmanager "tools"`, which no longer exists). Install only what the
+      # build needs via the runner's own sdkmanager.
+      - name: Android SDK packages
+        run: |
+          sdkmanager --install "platforms;android-35" "build-tools;35.0.0"
+          yes | sdkmanager --licenses >/dev/null
       - uses: gradle/actions/setup-gradle@v4
       # The repo now commits gradlew + gradle-wrapper.jar (generated via
       # `gradle wrapper --gradle-version 8.14.3`). If the wrapper were ever
