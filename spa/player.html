@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!--spa-version:1.0.2-->
+<!--spa-version:1.0.3-->
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8">
@@ -87,8 +87,8 @@
   .pv .wcBar input{flex:1;min-width:0;accent-color:var(--accent)}
   .pv .wcBar button{color:#fff;font-size:15px;padding:0 4px}
   .pv .wcBar span{color:#fff;font-size:11.5px;white-space:nowrap}
-  .pv .pback{position:absolute;left:8px;top:8px;z-index:3;width:34px;height:34px;border-radius:50%;background:#0007;color:#fff;font-size:22px;line-height:32px;text-align:center}
-  .pv .cloudq{position:absolute;right:10px;top:10px;z-index:4;background:rgba(20,20,24,.82)}
+  .pv .pback{position:absolute;left:10px;top:52px;z-index:3;width:34px;height:34px;border-radius:50%;background:#0007;color:#fff;font-size:22px;line-height:32px;text-align:center}
+  .pv .cloudq{position:absolute;right:10px;top:52px;z-index:4;background:rgba(20,20,24,.82)}
   /* audio-switch notice lives under the player so it never covers video */
   .pwarn{display:none}
   .pwarn.show{display:flex;align-items:center;gap:10px;padding:8px 14px;font-size:12.5px;color:var(--dim)}
@@ -242,28 +242,16 @@ function api(path,params,headers){
 
 // ── refresh pipeline status ──
 // Every read endpoint answers from the cache and carries the pipeline's
-// status in `refresh`; the pill tells the user data may change mid-view.
+// status in `refresh`; the pill only survives for a pending challenge.
 const REF={phase:'idle',wasRunning:false};
-const PHASE_LABEL={discover:'正在更新片库',details:'正在更新剧集信息',lines:'正在更新选集'};
 function updateRefPill(r){
   REF.phase=r.phase||'idle';
   const el=$('#refPill');
-  let text='';
-  if(r.challengePending||r.phase==='challenge'){
-    text='片源需要人机验证——请到运行本服务的设备上打开 App 完成验证';
-    el.classList.add('warn');
-  }else if(r.running){
-    const p=r.progress||{};
-    const bits=[];
-    if(r.phase==='discover'&&p.categoriesTotal)bits.push(`分类 ${p.categories||0}/${p.categoriesTotal}`);
-    if(r.phase==='details'&&p.showsTotal)bits.push(`剧集 ${p.shows||0}/${p.showsTotal}`);
-    if(r.phase==='lines'&&p.linesTotal)bits.push(`线路 ${p.lines||0}/${p.linesTotal}`);
-    text=`<b>${PHASE_LABEL[r.phase]||'片源刷新中'}</b>${bits.length?' '+bits.join(' · '):''}，页面数据可能稍后更新`;
-    el.classList.remove('warn');
-  }else if(r.phase==='error'){
-    text='片源刷新失败，将按计划重试';
-    el.classList.add('warn');
-  }
+  // Only the challenge warning survives — refresh progress/error toasts
+  // were pulled with the scheduler; manual refreshers see their own flow.
+  const text=(r.challengePending||r.phase==='challenge')
+    ?'片源需要人机验证——请到运行本服务的设备上打开 App 完成验证':'';
+  el.classList.toggle('warn',!!text);
   el.hidden=!text;
   el.innerHTML=text;
   // A run that just finished repopulates the cache — re-render the
