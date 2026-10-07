@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!--spa-version:1.0.3-->
+<!--spa-version:1.0.5-->
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8">
@@ -77,6 +77,8 @@
   .pv .ph{position:absolute;inset:0;background:#000 center/cover no-repeat;display:flex;align-items:center;justify-content:center}
   .pv .ph::before{content:"";position:absolute;inset:0;background:rgba(0,0,0,.55)}
   .pv .ph span{position:relative;color:#ddd;font-size:13px;padding:0 20px;text-align:center}
+  .pv .ph .diag{position:relative;display:block;margin:14px auto 0;padding:6px 18px;border:1px solid var(--line);border-radius:8px;background:#ffffff14;color:#ddd;font-size:13px}
+  .pv .ph pre{position:relative;margin:14px auto 0;max-width:92%;max-height:55%;overflow:auto;text-align:left;font-size:11px;line-height:1.5;color:#cfcfcf;background:#0009;border:1px solid var(--line);border-radius:8px;padding:10px;white-space:pre-wrap;word-break:break-all}
   .pv .ph .big{position:relative;width:56px;height:56px;border-radius:50%;background:var(--accent);display:flex;align-items:center;justify-content:center;font-size:22px;color:#fff;padding:0 0 0 4px}
   .pv video{position:absolute;inset:0;width:100%;height:100%;background:#000}
   /* WebCodecs player: canvas + custom control bar + buffering badge */
@@ -797,8 +799,9 @@ async function play(user){
           if(gen!==S.playGen)return;
           toast(errMsg(e)||'云端转码播放失败',6000);
           retireVideos();
-          pv.innerHTML=`<button class="pback" id="pBack">‹</button><div class="ph"><span style="color:#ff8f8f">${esc(errMsg(e)||'云端转码播放失败')}</span></div>`;
+          pv.innerHTML=`<button class="pback" id="pBack">‹</button><div class="ph"><div style="position:relative;max-width:92%"><span style="color:#ff8f8f">${esc(errMsg(e)||'云端转码播放失败')}</span><button class="diag" id="pDiag">诊断</button><pre id="pDiagOut" hidden></pre></div></div>`;
           $('#pBack').onclick=goBack;
+          $('#pDiag').onclick=()=>playDiag(ep.id);
         });
     };
     const v=startNative(d.streamUrl);
@@ -841,9 +844,45 @@ async function play(user){
     }
     if(handle(e,()=>play(user)))return;
     retireVideos();
-    pv.innerHTML=`<button class="pback" id="pBack">‹</button><div class="ph"><span style="color:#ff8f8f">${esc(errMsg(e))}</span></div>`;
+    pv.innerHTML=`<button class="pback" id="pBack">‹</button><div class="ph"><div style="position:relative;max-width:92%"><span style="color:#ff8f8f">${esc(errMsg(e))}</span><button class="diag" id="pDiag">诊断</button><pre id="pDiagOut" hidden></pre></div></div>`;
     $('#pBack').onclick=goBack;
+    $('#pDiag').onclick=()=>playDiag(ep.id);
   }
+}
+
+// ── play diagnostics ──
+// /api/play/diag re-runs share resolution step by step without failing
+// fast, comparing the stored catalog fid against the share's current
+// listing. Renders the verdict + per-step trace into the error panel.
+const DIAG_VERDICTS={
+  RESOLVES_NOW:'本次解析成功——刚才是瞬时失败，重试播放即可',
+  FID_CHANGED:'分享还在但文件 fid 变了——点「刷新资源」重抓这部剧',
+  FILE_GONE:'分享里已经找不到这个文件——链接失效或文件被删，换线路/源',
+  SHARE_LISTING_FAILED:'分享目录现在仍然拉取失败——可能是失效或限流，稍后再试',
+  SHARE_TOKEN_FAILED:'分享 token 换不到——分享失效或夸克限流',
+  SHARE_URL_INVALID:'库里存的分享地址无效——点「刷新资源」重抓',
+  STORED_ROW_MISSING:'本地库没有这集的资源记录——点「刷新资源」重抓',
+  PLAYABLE_FAILED:'文件在分享里，但夸克拒绝给播放地址',
+};
+async function playDiag(epId){
+  const out=$('#pDiagOut'),btn=$('#pDiag');
+  btn.disabled=true;btn.textContent='诊断中…';
+  out.hidden=false;out.textContent='正在逐项检查（存储 fid → 实时分享列表 → 播放地址）…';
+  try{
+    const d=await api('/api/play/diag',{episode:String(epId),...(S.lineId!=null?{line:String(S.lineId)}:{})});
+    const lines=[`结论: ${DIAG_VERDICTS[d.verdict]||d.verdict}`];
+    if(d.stored)lines.push(`存储: ${d.stored.fileName}  fid=${d.stored.fileId}`);
+    for(const s of d.steps||[])lines.push(`${s.ok?'✓':'✗'} ${s.step}: ${s.detail}`);
+    if(d.sameNameCandidates?.length){
+      lines.push('同名文件(可能是换 fid 的同一集):');
+      for(const c of d.sameNameCandidates)lines.push(`  ${c.fileName}  fid=${c.fid} dir=${c.dir}`);
+    }
+    if(d.trace?.length){lines.push('请求轨迹:');for(const t of d.trace)lines.push(`  ${t}`);}
+    out.textContent=lines.join('\n');
+  }catch(e2){
+    out.textContent='诊断请求失败: '+errMsg(e2);
+  }
+  btn.textContent='重新诊断';btn.disabled=false;
 }
 
 // ── external player handoff ──
