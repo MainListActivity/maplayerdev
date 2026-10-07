@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!--spa-version:1.0.6-->
+<!--spa-version:1.0.7-->
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8">
@@ -16,6 +16,7 @@
   button,input{font:inherit;color:inherit;background:none;border:none;outline:none}
   button{cursor:pointer}
   .logo{font-weight:800;font-size:18px;color:var(--accent);letter-spacing:.5px}
+  .logo .ver{font-weight:400;font-size:10px;color:var(--dim);margin-left:4px;letter-spacing:0}
   /* header: logo + search pill, then channel tabs */
   #head{position:sticky;top:0;z-index:20;background:linear-gradient(var(--bg) 70%,rgba(15,15,18,.9))}
   .hbar{display:flex;align-items:center;gap:10px;padding:10px 14px 6px;min-width:0}
@@ -426,7 +427,7 @@ function setNav(k){document.querySelectorAll('#nav a').forEach(a=>a.classList.to
 function header({back=false,q='',tabs=null,active=''}={}){
   const h=$('#head');
   h.hidden=false;
-  h.innerHTML=`<div class="hbar">${back?'<button class="back" id="hBack">‹</button>':'<span class="logo">MaPlayer</span>'}
+  h.innerHTML=`<div class="hbar">${back?'<button class="back" id="hBack">‹</button>':'<span class="logo">MaPlayer<span class="ver" id="spaVer"></span></span>'}
     <form class="search" id="sForm"><svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><path d="M10 3a7 7 0 0 1 5.6 11.2l5.1 5.1-1.4 1.4-5.1-5.1A7 7 0 1 1 10 3zm0 2a5 5 0 1 0 0 10 5 5 0 0 0 0-10z"/></svg>
       <input id="sInput" type="search" enterkeyhint="search" placeholder="搜索剧集、电影、综艺" value="${esc(q)}"><button class="go" id="sGo">搜索</button></form></div>
     ${tabs?`<div class="tabs">${tabs.map(t=>`<a class="tab${t===active?' on':''}" href="${t==='推荐'?'#/':'#/cat?name='+encodeURIComponent(t)}">${esc(t)}</a>`).join('')}</div>`:''}`;
@@ -438,7 +439,12 @@ function header({back=false,q='',tabs=null,active=''}={}){
   if(back)$('#hBack').onclick=goBack;
   const on=h.querySelector('.tab.on');
   if(on)on.scrollIntoView({inline:'center',block:'nearest'});
+  const sv=$('#spaVer');if(sv&&SPA_VER!==undefined)sv.textContent=SPA_VER?' v'+SPA_VER:'';
 }
+// Which player.html is actually running — surfaced next to the logo so a
+// stale tab/CDN copy is obvious. Fetched once; empty until the API replies.
+let SPA_VER;
+api('/api/spa/version').then(d=>{SPA_VER=(d&&d.version)||'';const sv=$('#spaVer');if(sv)sv.textContent=SPA_VER?' v'+SPA_VER:'';}).catch(()=>{});
 function goBack(){if(history.length>1)history.back();else location.hash='#/';}
 
 function card(s,sub){
@@ -592,7 +598,7 @@ function viewHistory(){
 }
 
 // ── show / 选集 ──
-const S={id:0,d:null,lineId:null,epId:null,gen:0,playGen:0,listing:false,err:null,expand:false};
+const S={id:0,d:null,lineId:null,epId:null,gen:0,playGen:0,listing:false,err:null,expand:false,healed:''};
 function allLines(d){return(d?.sites||[]).flatMap(s=>s.lines.map(l=>({...l,site:s})));}
 async function viewShow(id){
   setNav('');
@@ -751,6 +757,25 @@ function retireVideos(){
     if(m){try{m.an.disconnect();}catch(e){}try{m.ctx.close();}catch(e){}v.__meter=null;}
   });
 }
+// Errors that mean the stored share went bad — one auto single-show
+// re-scrape heals them (fetches fresh share URLs/fids from the site).
+const HEAL_CODES=new Set(['EPISODE_STALE','SHARE_DETAIL_FAILED','SHARE_TOKEN_FAILED','SHARE_URL_INVALID','STORED_ROW_MISSING','PLAYABLE_FAILED']);
+// Re-scrape this show once and retry the same episode under its new ids.
+// Returns true when the attempt was retried (or the generation moved on).
+async function healDeadLink(ep,gen,retry){
+  const key=`${S.id}:${S.lineId}:${ep.id}`;
+  if(S.healed===key)return false;
+  S.healed=key;
+  toast('分享链接已失效，正在重新抓取本剧资源…',6000);
+  try{await refreshShow(true);}catch(_){}
+  if(gen!==S.playGen)return true;
+  const eps=S.d?.episodes||[];
+  const same=eps.find(x=>x.title===ep.title&&x.lines.includes(S.lineId))||eps.find(x=>x.title===ep.title);
+  if(!same)return false; // episode vanished after re-scrape → caller shows the error
+  S.epId=same.id;renderEps();renderPlayer();
+  retry();
+  return true;
+}
 async function play(user){
   const ep=(S.d?.episodes||[]).find(e=>e.id===S.epId);if(!ep)return;
   const gen=++S.playGen;
@@ -836,6 +861,28 @@ async function play(user){
     // cloud-switch button instead of degrading on the user's behalf —
     // silent-now may beat a transcode wait.
     const showGen=S.gen;
+    // Local transcode: the server's ffmpeg remuxes/re-encodes to fMP4
+    // HLS — used when this browser can't decode the source's audio. The
+    // server prefers an AAC audio track when the file carries one, which
+    // covers "silent first track" files outright; on failure the cloud
+    // degrade nag stays as the manual last resort.
+    const toLocal=(v,why)=>{
+      if(degraded||gen!==S.playGen||(v&&!v.isConnected))return;
+      degraded=true;
+      if(v)v.onerror=null;
+      hideCloudSwitch();
+      hlsDestroy();
+      toast((why||'音轨无法解码')+'，正在本地转码…',8000);
+      const u=new URL(d.streamUrl,location.origin);
+      const sid=u.pathname.split('/').pop();
+      const url=`/hls/${sid}/index.m3u8?token=${encodeURIComponent(u.searchParams.get('token')||pin)}`;
+      attachLocalHls(v||startNative(url),url,()=>{
+        if(gen!==S.playGen)return;
+        degraded=false;
+        toast('本地转码不可用',4000);
+        showCloudSwitch('检测到音轨无法解码或没有声音',()=>toCloud(v,'音轨无法解码'));
+      });
+    };
     probeAudio(d.streamUrl,d.contentLength||0).then(async a=>{
       if(gen!==S.playGen||showGen!==S.gen||a===undefined||degraded||!v.isConnected)return;
       if(nativeAudioOK(a))return;
@@ -843,13 +890,16 @@ async function play(user){
       // a non-default first track). Measure what actually comes out of
       // the element — real energy means sound is playing, no nag.
       const verdict=await measureOutput(v,8000);
-      if(gen!==S.playGen||showGen!==S.gen||degraded||!v.isConnected||verdict==='sound')return;
+      if(gen!==S.playGen||showGen!==S.gen||degraded||!v.isConnected)return;
+      if(verdict==='sound')return;
+      if(verdict==='silent'){toLocal(v,'检测到音轨无法解码或没有声音');return;}
       showCloudSwitch('检测到音轨无法解码或没有声音',()=>toCloud(v,'音轨无法解码'));
     }).catch(()=>{});
     pushHist({id:S.id,title:S.d.title,cover:S.d.cover,remark:S.d.remark,epId:ep.id,ep:ep.title});
     if(d.lineId!=null&&d.lineId!==S.lineId&&user)toast('当前线路缺少该集，已切换到其他线路');
   }catch(e){
     if(gen!==S.playGen)return;
+    if(HEAL_CODES.has(e.code)&&await healDeadLink(ep,gen,()=>play(user)))return;
     if(e.code==='EPISODE_STALE'){
       toast('线路文件已变化，已重新读取');
       // Force a line re-list first — the share changed, so the catalog's
@@ -915,12 +965,13 @@ async function playExternal(){
   if(!ep){toast('先选择要播放的剧集');return;}
   // Resolves only — never touches the player subtree. If the user
   // re-picks an episode while the share resolves, drop the stale reply.
-  const epId=ep.id;
+  const epId=ep.id,pg=S.playGen;
   try{
     const d=await api('/api/play',{episode:String(ep.id),...(S.lineId!=null?{line:String(S.lineId)}:{})});
     if(S.epId!==epId)return;
     extSheet(new URL(d.streamUrl,location.origin).href,`${S.d.title} ${ep.title}`.trim());
   }catch(e){
+    if(HEAL_CODES.has(e.code)&&await healDeadLink(ep,pg,()=>playExternal()))return;
     if(e.code==='EPISODE_STALE'){
       toast('线路文件已变化，已重新读取');
       try{S.d=await api('/api/show',{id:String(S.id)});}catch(_){}
@@ -1088,6 +1139,29 @@ function attachCloud(v,cd){
     v.src=url;tryPlay();
   }else toast('浏览器不支持 HLS 播放',6000);
   cloudPicker(v,cd);
+}
+// Attach the server's own ffmpeg transcode (/hls/<sid>/index.m3u8) —
+// same Safari-native / hls.js split as the cloud path. onFatal fires on
+// unrecoverable attach errors (missing ffmpeg, dead playlist) so the
+// caller can fall back to the cloud degrade.
+function attachLocalHls(v,url,onFatal){
+  const tryPlay=()=>v.play().catch(()=>{
+    v.muted=true;v.play().catch(()=>{});
+    const unmute=()=>{v.muted=false;document.removeEventListener('pointerdown',unmute);};
+    document.addEventListener('pointerdown',unmute);
+  });
+  const bad=()=>{if(v.isConnected)onFatal();};
+  if(IS_SAFARI&&v.canPlayType('application/vnd.apple.mpegurl')){
+    v.src=url;v.onerror=bad;tryPlay();
+  }else if(window.Hls&&Hls.isSupported()){
+    const h=new Hls({liveSyncDurationCount:3,maxBufferLength:60});
+    hlsDestroy();S.hls=h;
+    h.on(Hls.Events.MANIFEST_PARSED,tryPlay);
+    h.on(Hls.Events.ERROR,(_,data)=>{if(data?.fatal)bad();});
+    h.loadSource(url);h.attachMedia(v);
+  }else if(v.canPlayType('application/vnd.apple.mpegurl')){
+    v.src=url;v.onerror=bad;tryPlay();
+  }else onFatal();
 }
 // Manual resolution picker shown while a cloud stream is attached —
 // only when the upstream offered more than one transcoded variant.
