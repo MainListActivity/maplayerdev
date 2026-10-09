@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!--spa-version:1.0.7-->
+<!--spa-version:1.0.8-->
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8">
@@ -124,6 +124,8 @@
   .chip{flex:none;padding:6px 14px;border-radius:6px;background:var(--panel2);font-size:12.5px;color:#ccc;white-space:nowrap}
   .chip.on{background:rgba(255,106,26,.16);color:var(--accent)}
   .chip small{color:var(--dim);margin-left:4px}
+  a.chip.go{padding:6px 9px;color:var(--dim);text-decoration:none;display:inline-flex;align-items:center}
+  a.chip.go:active,a.chip.go:hover{color:var(--accent2)}
   .eprow{display:flex;gap:8px;overflow-x:auto;padding:0 14px}
   .eps{display:grid;grid-template-columns:repeat(auto-fill,minmax(60px,1fr));gap:8px;padding:0 14px}
   .ep{flex:none;min-width:56px;height:48px;padding:0 8px;border-radius:6px;background:var(--panel2);font-size:14px;color:#ddd;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;position:relative}
@@ -694,7 +696,7 @@ function renderLines(){
   if(!sites.length){b.innerHTML=`<h3>资源</h3><div class="status" style="padding:10px 14px;text-align:left">${S.refreshing?'正在从片源获取线路…':'该剧暂无可用网盘线路'}</div>`;return;}
   b.innerHTML=`<h3>资源<small>${sites.length} 个片源 · ${allLines(S.d).length} 条线路</small></h3>`+
     sites.map(s=>`${sites.length>1?`<div style="padding:0 14px 6px;font-size:12px;color:var(--dim)">${esc(s.name)}</div>`:''}
-      <div class="chips" style="margin-bottom:8px">${s.lines.map(l=>`<button class="chip${l.id===S.lineId?' on':''}" data-l="${l.id}">${esc(l.label||'线路')}${l.listed?`<small>${l.files}</small>`:''}</button>`).join('')}</div>`).join('');
+      <div class="chips" style="margin-bottom:8px">${s.lines.map(l=>`<button class="chip${l.id===S.lineId?' on':''}" data-l="${l.id}">${esc(l.label||'线路')}${l.listed?`<small>${l.files}</small>`:''}</button>${l.shareUrl?`<a class="chip go" href="${esc(l.shareUrl)}" target="_blank" rel="noopener" title="${esc(l.shareUrl)}">↗</a>`:''}`).join('')}</div>`).join('');
   // Line selection is local-only — the catalog answers immediately;
   // an unlisted line's episodes arrive with the next refresh run.
   b.querySelectorAll('[data-l]').forEach(x=>{x.onclick=()=>{const id=+x.dataset.l;if(id!==S.lineId){S.lineId=id;S.lineErr=null;renderLines();renderEps();renderPlayer();}};});
