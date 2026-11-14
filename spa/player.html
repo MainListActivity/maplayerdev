@@ -760,15 +760,25 @@ async function downloadEp(id){
   const pg=S.playGen;
   try{
     const d=await api('/api/play',{episode:String(ep.id),...(S.lineId!=null?{line:String(S.lineId)}:{})});
+    const u=new URL(d.streamUrl,location.origin);
+    u.searchParams.set('download','1');
+    // Old app builds ignore ?download and return the 512KiB startup
+    // probe window — the saved file would be silently truncated. Probe
+    // once and bail instead; a ?download-aware server answers 200.
+    const probe=await fetch(u);
+    if(probe.status!==200){probe.body?.cancel();toast('下载功能需要较新的 App 版本，请升级后重试',6000);return;}
+    probe.body?.cancel();
     // Detached <a download>: no DOM insert needed — and its synthetic
     // click must not reach the document's exit-mode handler anyway.
     const a=document.createElement('a');
-    a.href=new URL(d.streamUrl,location.origin).href;
+    a.href=u.href;
     a.download=d.name||`${S.d.title} ${ep.title}`;
     a.click();
     toast(`已开始下载：${a.download}`);
   }catch(e){
-    if(HEAL_CODES.has(e.code)&&await healDeadLink(ep,pg,()=>downloadEp(id)))return;
+    // After a heal the episode ids changed — retry the healed id
+    // (healDeadLink stores it on S.epId), not the stale one we tapped.
+    if(HEAL_CODES.has(e.code)&&await healDeadLink(ep,pg,()=>downloadEp(S.epId)))return;
     if(e.code==='EPISODE_STALE'){
       toast('线路文件已变化，已重新读取');
       listLine(S.lineId,true);
