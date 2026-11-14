@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!--spa-version:1.0.8-->
+<!--spa-version:1.0.9-->
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8">
@@ -134,6 +134,9 @@
   .ep.on{color:var(--accent);background:rgba(255,106,26,.16);font-weight:600}
   .ep.off{color:#666}
   .ep.off::after{content:"其他线路";position:absolute;right:0;top:0;font-size:8.5px;padding:0 3px;border-radius:0 6px 0 4px;background:#3a3a44;color:#aaa;font-weight:400}
+  /* download mode: every episode becomes a download target */
+  body.dl .ep{background:rgba(255,154,60,.14)}
+  body.dl .ep::before{content:"⬇";position:absolute;left:3px;top:1px;font-size:9px;color:var(--accent2)}
   #sheet{position:fixed;inset:0;z-index:40;background:#0008;display:flex;align-items:flex-end}
   #sheet .panel{width:100%;max-height:72vh;overflow-y:auto;background:var(--panel);border-radius:14px 14px 0 0;padding:14px 0 calc(16px + var(--safe-b))}
   #sheet .panel h3{display:flex;justify-content:space-between;padding:0 14px 12px;font-size:15px}
@@ -600,7 +603,7 @@ function viewHistory(){
 }
 
 // ── show / 选集 ──
-const S={id:0,d:null,lineId:null,epId:null,gen:0,playGen:0,listing:false,err:null,expand:false,healed:''};
+const S={id:0,d:null,lineId:null,epId:null,gen:0,playGen:0,listing:false,err:null,expand:false,healed:'',dl:false};
 function allLines(d){return(d?.sites||[]).flatMap(s=>s.lines.map(l=>({...l,site:s})));}
 async function viewShow(id){
   setNav('');
@@ -683,11 +686,13 @@ function renderMeta(){
     ${d.intro?`<div class="intro${S.expand?' open':''}" id="intro">简介：${esc(d.intro)}</div>`:''}
     <div class="tools"><button class="chipbtn" id="refBtn">${S.refreshing?'正在刷新资源…':'刷新资源'}</button>
       <button class="chipbtn" id="extBtn">外部播放</button>
+      <button class="chipbtn${S.dl?' on':''}" id="dlBtn">下载</button>
       ${S.err?`<span style="font-size:12px;color:var(--accent2)">${S.err==='CHALLENGE_REQUIRED'?'片源需验证，显示缓存':'片源刷新失败，显示缓存'}</span>`:''}
       <select class="chipbtn spd" id="spd">${[0.5,0.75,1,1.25,1.5,2,3].map(v=>`<option value="${v}"${v===(S.rate||1)?' selected':''}>${v}x</option>`).join('')}</select></div>`;
   const i=$('#intro');if(i)i.onclick=()=>{S.expand=!S.expand;i.classList.toggle('open',S.expand);};
   $('#refBtn').onclick=()=>{if(!S.refreshing)refreshShow(true).then(()=>toast('资源已刷新'));};
   $('#extBtn').onclick=playExternal;
+  $('#dlBtn').onclick=()=>setDl(!S.dl);
   $('#spd').onchange=e=>{S.rate=+e.target.value;const v=$('#v');if(v)v.playbackRate=S.rate;};
 }
 function renderLines(){
@@ -718,7 +723,7 @@ function renderEps(){
   b.innerHTML=`<h3>选集<small>${S.listing?'更新中… ':''}${eps.length?`共 ${eps.length} 集`:''}${eps.length>12?' <button id="epAll">全部 ›</button>':''}</small></h3>${body}`;
   const r=$('#lRetry');if(r)r.onclick=()=>listLine(S.lineId,true);
   const all=$('#epAll');if(all)all.onclick=openEpSheet;
-  b.querySelectorAll('[data-e]').forEach(x=>{x.onclick=()=>pickEp(+x.dataset.e);});
+  b.querySelectorAll('[data-e]').forEach(x=>{x.onclick=()=>epTap(+x.dataset.e);});
   const cur=b.querySelector('.ep.on');
   if(cur&&window.innerWidth<900)cur.scrollIntoView({inline:'center',block:'nearest'});
 }
@@ -729,9 +734,60 @@ function openEpSheet(){
   sh.hidden=false;
   sh.onclick=e=>{if(e.target===sh)sh.hidden=true;};
   $('#shX').onclick=()=>{sh.hidden=true;};
-  sh.querySelectorAll('[data-e]').forEach(x=>{x.onclick=()=>{sh.hidden=true;pickEp(+x.dataset.e);};});
+  sh.querySelectorAll('[data-e]').forEach(x=>{x.onclick=()=>{if(S.dl){epTap(+x.dataset.e);return;}sh.hidden=true;pickEp(+x.dataset.e);};});
 }
 function pickEp(id){S.epId=id;renderEps();play(true);}
+// One episode tap, two behaviors: normal mode plays, download mode saves.
+function epTap(id){if(S.dl)downloadEp(id);else pickEp(id);}
+// Download mode: the tools-row 下载 chip toggles it, every [data-e] button
+// downloads instead of playing, and any tap outside the episode area
+// returns to normal mode (see the document click handler at the bottom).
+function setDl(on,quiet){
+  if(S.dl===on)return;
+  S.dl=on;
+  document.body.classList.toggle('dl',on);
+  const b=$('#dlBtn');if(b)b.classList.toggle('on',on);
+  if(!quiet)toast(on?'下载模式已开启：点某一集即开始下载':'已退出下载模式');
+}
+// Resolves the episode through /api/play — the same pipeline playback
+// uses — then lets the browser save the share-direct stream under the
+// share's real file name. Server needs no change: <a download> on a
+// same-origin URL forces a download instead of inline playback.
+async function downloadEp(id){
+  const ep=(S.d?.episodes||[]).find(e=>e.id===id);
+  if(!ep)return;
+  toast(`正在解析「${ep.title}」的下载地址…`);
+  const pg=S.playGen;
+  try{
+    const d=await api('/api/play',{episode:String(ep.id),...(S.lineId!=null?{line:String(S.lineId)}:{})});
+    const u=new URL(d.streamUrl,location.origin);
+    u.searchParams.set('download','1');
+    // Old app builds ignore ?download and return the 512KiB startup
+    // probe window — the saved file would be silently truncated. Probe
+    // once and bail instead; a ?download-aware server answers 200.
+    const probe=await fetch(u);
+    if(probe.status!==200){probe.body?.cancel();toast('下载功能需要较新的 App 版本，请升级后重试',6000);return;}
+    probe.body?.cancel();
+    // Detached <a download>: no DOM insert needed — and its synthetic
+    // click must not reach the document's exit-mode handler anyway.
+    const a=document.createElement('a');
+    a.href=u.href;
+    a.download=d.name||`${S.d.title} ${ep.title}`;
+    a.click();
+    toast(`已开始下载：${a.download}`);
+  }catch(e){
+    // After a heal the episode ids changed — retry the healed id
+    // (healDeadLink stores it on S.epId), not the stale one we tapped.
+    if(HEAL_CODES.has(e.code)&&await healDeadLink(ep,pg,()=>downloadEp(S.epId)))return;
+    if(e.code==='EPISODE_STALE'){
+      toast('线路文件已变化，已重新读取');
+      listLine(S.lineId,true);
+      try{S.d=await api('/api/show',{id:String(S.id)});}catch(_){}
+      renderLines();renderEps();renderPlayer();return;
+    }
+    if(!handle(e,()=>downloadEp(id)))toast(errMsg(e));
+  }
+}
 function renderPlayer(){
   const pv=$('#pv');if(!pv||!S.d)return;
   if(pv.querySelector('video,canvas'))return;
@@ -1226,6 +1282,7 @@ let currentView='';
 // where the user was, not at the top.
 const scrollPos={};
 async function route(){
+  setDl(false,true);
   $('#sheet').hidden=true;
   scrollPos[currentView]=window.scrollY;
   const h=location.hash||'#/';
@@ -1272,6 +1329,14 @@ document.addEventListener('fullscreenchange',()=>{
   if(!o)return;
   if(document.fullscreenElement){o.lock&&o.lock('landscape').catch(()=>{});}
   else{o.unlock&&o.unlock();}
+});
+// Download mode exit: any tap that is not on an episode button or the
+// 下载 chip drops back to normal mode. #epsBlk stays safe so the 选集
+// title area and 全部› (which opens the full grid sheet) work in mode.
+document.addEventListener('click',e=>{
+  if(!S.dl||!e.isTrusted)return; // synthetic clicks (the download <a>) never exit
+  if(e.target.closest('[data-e],#dlBtn,#epsBlk'))return;
+  setDl(false);
 });
 window.addEventListener('hashchange',route);
 boot();
