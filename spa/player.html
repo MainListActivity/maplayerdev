@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!--spa-version:1.0.9-->
+<!--spa-version:1.1.0-->
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8">
@@ -774,6 +774,12 @@ async function downloadEp(id){
     a.href=u.href;
     a.download=d.name||`${S.d.title} ${ep.title}`;
     a.click();
+    // Pull playback to the downloaded episode so the user can tell which
+    // one they just saved (选集 highlight + the player switch). If a
+    // video is attached, load the new episode into it; otherwise the
+    // placeholder already points at it — no unsolicited autoplay.
+    S.epId=id;renderEps();
+    if(document.querySelector('#pv video,#pv canvas'))play(true);else renderPlayer();
     toast(`已开始下载：${a.download}`);
   }catch(e){
     // After a heal the episode ids changed — retry the healed id
